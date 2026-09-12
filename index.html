@@ -170,9 +170,9 @@
   </div>
 
   <script>
-    // ⚠️ 請填入你的 Supabase 設定
-    const SUPABASE_URL = "YOUR_SUPABASE_URL";
-    const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+    // 已直接填入您的 Supabase 設定
+    const SUPABASE_URL = "https://wapzvjbznljypadjjseh.supabase.co";
+    const SUPABASE_ANON_KEY = "sb_publishable_oJT7f2i2rbG-6wtiMPb34w_6li_eGrj";
 
     const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -209,78 +209,97 @@
 
     // --- 大廳邏輯 ---
     async function fetchLiveRooms() {
-      const { data, error } = await supabase.rpc("list_live_rooms");
-      const listEl = document.getElementById("room-list");
-      listEl.innerHTML = "";
+      try {
+        const { data, error } = await supabase.rpc("list_live_rooms");
+        const listEl = document.getElementById("room-list");
+        listEl.innerHTML = "";
 
-      if (error) {
-        console.error(error);
-        return;
+        if (error) {
+          console.error("fetchLiveRooms error:", error);
+          return;
+        }
+
+        if (!data || data.length === 0) {
+          listEl.innerHTML = `<li style="color: var(--text-dim); text-align: center;">目前沒有開房中的房間</li>`;
+          return;
+        }
+
+        data.forEach(room => {
+          const li = document.createElement("li");
+          li.className = "room-item";
+          li.innerHTML = `
+            <span><b>${room.host_nickname}</b> 的房間</span>
+            <button class="btn" style="width:auto; margin:0; padding:6px 12px;" onclick="joinRoom('${room.id}')">加入對戰</button>
+          `;
+          listEl.appendChild(li);
+        });
+      } catch (err) {
+        console.error("fetchLiveRooms catch:", err);
       }
-
-      if (!data || data.length === 0) {
-        listEl.innerHTML = `<li style="color: var(--text-dim); text-align: center;">目前沒有開房中的房間</li>`;
-        return;
-      }
-
-      data.forEach(room => {
-        const li = document.createElement("li");
-        li.className = "room-item";
-        li.innerHTML = `
-          <span><b>${room.host_nickname}</b> 的房間</span>
-          <button class="btn" style="width:auto; margin:0; padding:6px 12px;" onclick="joinRoom('${room.id}')">加入對戰</button>
-        `;
-        listEl.appendChild(li);
-      });
     }
 
     // --- 建立房間 ---
     async function createRoom() {
       const nickname = getNickname();
-      const { data, error } = await supabase.rpc("create_room", {
-        p_nickname: nickname,
-        p_client_token: clientToken
-      });
-
-      if (error) {
-        alert("建立房間失敗: " + error.message);
-        return;
-      }
-
-      currentRoomId = data.room_id;
-      showView("view-waiting");
-
-      // 啟動心跳維護房主線上狀態
-      heartbeatTimer = setInterval(() => {
-        supabase.rpc("heartbeat_room", {
-          p_room_id: currentRoomId,
+      try {
+        const { data, error } = await supabase.rpc("create_room", {
+          p_nickname: nickname,
           p_client_token: clientToken
         });
-      }, 3000);
 
-      // 監聽房間狀態變更 (等待玩家2加入)
-      subscribeToGame();
+        if (error) {
+          console.error("createRoom error:", error);
+          alert("建立房間失敗（資料庫錯誤）:\n" + error.message);
+          return;
+        }
+
+        if (!data || !data.room_id) {
+          alert("建立房間失敗：伺服器未回傳 room_id");
+          return;
+        }
+
+        currentRoomId = data.room_id;
+        showView("view-waiting");
+
+        // 啟動心跳維護房主線上狀態
+        heartbeatTimer = setInterval(() => {
+          supabase.rpc("heartbeat_room", {
+            p_room_id: currentRoomId,
+            p_client_token: clientToken
+          });
+        }, 3000);
+
+        // 監聽房間狀態變更
+        subscribeToGame();
+      } catch (err) {
+        console.error("createRoom exception:", err);
+        alert("建立房間發生異常錯誤，請按 F12 查看 Console");
+      }
     }
 
     // --- 加入房間 ---
     async function joinRoom(roomId) {
       const nickname = getNickname();
-      const { data, error } = await supabase.rpc("join_room", {
-        p_room_id: roomId,
-        p_nickname: nickname,
-        p_client_token: clientToken
-      });
+      try {
+        const { data, error } = await supabase.rpc("join_room", {
+          p_room_id: roomId,
+          p_nickname: nickname,
+          p_client_token: clientToken
+        });
 
-      if (error) {
-        alert("無法加入房間: " + error.message);
-        fetchLiveRooms();
-        return;
+        if (error) {
+          alert("無法加入房間: " + error.message);
+          fetchLiveRooms();
+          return;
+        }
+
+        currentRoomId = roomId;
+        showView("view-game");
+        generateQuestion();
+        subscribeToGame();
+      } catch (err) {
+        console.error("joinRoom error:", err);
       }
-
-      currentRoomId = roomId;
-      showView("view-game");
-      generateQuestion();
-      subscribeToGame();
     }
 
     // --- 取消房間 ---
